@@ -16,35 +16,47 @@ export async function node(
   node.use(express.json());
   node.use(bodyParser.json());
 
-  // TODO implement this
-  // this route allows retrieving the current status of the node
-  // node.get("/status", (req, res) => {});
+  // Route to retrieve the current status of the node
+  node.get("/status", (req, res) => {
+    res.json({ nodeId, isFaulty, N, F, initialValue });
+  });
 
-  // TODO implement this
-  // this route allows the node to receive messages from other nodes
-  // node.post("/message", (req, res) => {});
+  // Route to receive messages from other nodes
+  node.post("/message", (req, res) => {
+    // Handle incoming message here
+    const message = req.body.message;
+    console.log(`Node ${nodeId} received message: ${message}`);
+    res.sendStatus(200); // Sending OK status
+  });
 
-  // TODO implement this
-  // this route is used to start the consensus algorithm
-  // node.get("/start", async (req, res) => {});
+  // Route to start the consensus algorithm
+  node.get("/start", async (req, res) => {
+    // Implement starting consensus algorithm here
+    console.log(`Node ${nodeId} started the consensus algorithm.`);
+    res.sendStatus(200); // Sending OK status
+  });
 
-  // TODO implement this
-  // this route is used to stop the consensus algorithm
-  // node.get("/stop", async (req, res) => {});
+  // Route to stop the consensus algorithm
+  node.get("/stop", async (req, res) => {
+    // Implement stopping consensus algorithm here
+    console.log(`Node ${nodeId} stopped the consensus algorithm.`);
+    res.sendStatus(200); // Sending OK status
+  });
 
-  // TODO implement this
-  // get the current state of a node
-  // node.get("/getState", (req, res) => {});
+  // Route to get the current state of a node
+  node.get("/getState", (req, res) => {
+    // Implement getting current state here
+    res.json({ nodeId, state: "current state" }); // Placeholder response
+  });
 
-  // start the server
+  // Start the server
   const server = node.listen(BASE_NODE_PORT + nodeId, async () => {
     console.log(
       `Node ${nodeId} is listening on port ${BASE_NODE_PORT + nodeId}`
     );
-
-    // the node is ready
     setNodeIsReady(nodeId);
   });
-
+  return server;
+}
   return server;
 }
