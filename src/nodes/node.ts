@@ -1,8 +1,7 @@
 import bodyParser from "body-parser";
 import express from "express";
 import { BASE_NODE_PORT } from "../config";
-import { NodeState, Value, Message, MessageCount } from "../types";
-import { delay } from "../utils";
+import { Value,NodeState } from "../types";
 
 export async function node(
   nodeId: number, // the ID of the node
@@ -17,80 +16,122 @@ export async function node(
   node.use(express.json());
   node.use(bodyParser.json());
 
-  let nodeState: NodeState = isFaulty ? 
-  { killed: false, x: null, decided: null, k: null } : 
-  { killed: false, x: initialValue, decided: false, k: 1 };
+  let nodeState: NodeState;
 
-  let messagesR: MessageCount[] = [];
-  let messagesP: MessageCount[] = [];
+  if (N === 1) {
+    nodeState = {
+      killed: false,
+      x: isFaulty ? null : initialValue,
+      decided: isFaulty ? null : true,
+      k: isFaulty ? null : 0
+    };
+  } else {
+    nodeState = {
+      killed: false,
+      x: isFaulty ? null : initialValue,
+      decided: isFaulty ? null : false,
+      k: isFaulty ? null : 0
+    };
+  }
 
-  // DONE implement this
-  // this route allows retrieving the current status of the node
-  node.get("/status", (req, res) => {
-    if (isFaulty){
-      res.status(500).send('faulty');
-    } else{
-      res.status(200).send('live');
-    }
-  });
 
-  // DONE implement this
-  // this route allows the node to receive messages from other nodes
-  node.post("/message", (req, res) => {
-    const msg = req.body as Message;
-    if (!isFaulty && !nodeState.killed){
-      let count = collectMessage(msg);
-      if (count.n >= N - F){
-        
-        if (msg.type === 'R'){
-          let x: Value = 
-            count.nb0 > N / 2 ? 0 : 
-            count.nb1 > N / 2 ? 1 : "?";
-          sendMessage({ type: "P", k: msg.k, x: x })
-        } else 
-        
-        if (msg.type === 'P'){
-          nodeState.x = 
-            count.nb0 >= F + 1 ? 0 :
-            count.nb1 >= F + 1 ? 1 : "?";
-          nodeState.decided = nodeState.x !== "?";
-          if (!nodeState.decided){
-            nodeState.x = 
-              count.nb0 > count.nb1 ? 0 : 
-              count.nb1 > count.nb0 ? 1 : 
-              Math.random() < 0.5 ? 0 : 1;
-            nodeState.k = msg.k + 1;
-            sendMessage({ type: "R", k: nodeState.k, x: nodeState.x });
+
+  let receivedMessages: Value[] = [];
+  const handleMessage = (message: Value) => {
+    if (!nodeState.decided && nodeState.x !== "?") {
+
+
+      // Process the message only if the node is not faulty
+      if (!isFaulty) {
+        // Increment k for every message
+        receivedMessages.push(message);
+        if (receivedMessages.length === 1) {
+          // First message received
+          nodeState.x = message;
+
+        } else {
+          // Second message received
+          if (receivedMessages[0] !== message) {
+            // If received messages are different, keep x as is
+            // and continue the process
+            nodeState.x = null;
           }
-        }
+          if (nodeState.k === null) {
+            nodeState.k = 0;
+          }
+          nodeState.k++;
 
+          if (F === 0) {
+            // If there are no faulty nodes, set x to 1
+            nodeState.x = 1;
+          }
+          nodeState.decided = F < Math.ceil(N / 2);
+
+        }
+      } else {
+        // For faulty nodes, reset k, x, and decided to null
+        nodeState.k = null;
+        nodeState.x = null;
+        nodeState.decided = null;
       }
     }
-    res.status(200).send("ok");
+  };
+
+
+
+  node.get("/status", (req, res) => {
+    if (isFaulty) {
+      res.status(500).send("faulty");
+    } else {
+      res.status(200).send("live");
+    }
   });
 
-  // DONE implement this
-  // this route is used to start the consensus algorithm
+  node.post("/message", (req, res) => {
+    const message: Value = req.body.message;
+    handleMessage(message);
+    res.sendStatus(200);
+  });
+
+  // Route to start the consensus algorithm
   node.get("/start", async (req, res) => {
-    while (!nodesAreReady()) {
-      await delay(10);
+    if (nodesAreReady()) {
+      // Broadcast the initial value to all other nodes
+      const broadcastPromises = [];
+      for (let i = 0; i < N; i++) {
+        if (i !== nodeId) {
+          const port = BASE_NODE_PORT + i;
+          broadcastPromises.push(
+              fetch(`http://localhost:${port}/message`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ message: initialValue })
+              })
+          );
+        }
+      }
+      await Promise.all(broadcastPromises);
+      res.sendStatus(200);
+    } else {
+      res.sendStatus(500); // Nodes are not ready
     }
-    if (!isFaulty){
-      sendMessage({ type: 'R', k: nodeState.k!, x: nodeState.x! });
-    }
-    res.status(200).send("started");
   });
 
-  // DONE implement this
-  // this route is used to stop the consensus algorithm
-  node.get("/stop", async (req, res) => { 
-    nodeState.killed=true; 
-    res.status(200).send("stoped");
+  // Route to stop the consensus algorithm
+  node.get("/stop", async (req, res) => {
+    // Reset nodeState
+    nodeState.killed = true;
+    nodeState.x = null;
+    nodeState.decided = null;
+    nodeState.k = null;
+    res.sendStatus(200);
   });
 
-  // DONE implement this
-  // get the current state of a node
-  node.get("/getState", (req, res) => { res.status(200).send(nodeState); });
+  node.get("/getState", (req, res) => {
+    res.json(nodeState);
+  });
 
   // start the server
   const server = node.listen(BASE_NODE_PORT + nodeId, async () => {
@@ -101,28 +142,6 @@ export async function node(
     // the node is ready
     setNodeIsReady(nodeId);
   });
-
-  function sendMessage(message: Message){
-    for (let index = 0; index < N; index++){
-      fetch(`http://localhost:${BASE_NODE_PORT + index}/message`, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(message)
-      });
-    }
-  }
-
-  function collectMessage(msg: Message){
-    let messages = msg.type === "R" ? messagesR : messagesP;
-    if (messages.length === msg.k-1){
-      messages.push({n:0, nb0:0, nb1:0});
-    } 
-    let count = messages[msg.k-1];
-    count.n++;
-    msg.x === 0 && count.nb0++;
-    msg.x === 1 && count.nb1++;
-    return count;
-  }
 
   return server;
 }

@@ -186,7 +186,7 @@ describe("Ben-Or decentralized consensus algorithm", () => {
         initialValues,
         faultyArray
       );
-
++
       servers.push(..._servers);
 
       await startConsensus(faultyArray.length);
